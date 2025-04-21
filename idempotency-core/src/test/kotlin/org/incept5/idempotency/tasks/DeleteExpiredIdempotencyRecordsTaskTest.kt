@@ -7,6 +7,7 @@ import org.incept5.idempotency.domain.IdempotencyStatus
 import org.incept5.idempotency.repository.IdempotencyRecordRepository
 import java.time.Duration
 import java.time.Instant
+import java.util.*
 
 class DeleteExpiredIdempotencyRecordsTaskTest : FunSpec({
 
@@ -31,7 +32,7 @@ class DeleteExpiredIdempotencyRecordsTaskTest : FunSpec({
         override fun deleteExpiredRecords(): Int {
             val now = Instant.now()
             val expiredKeys = records.filter { (_, record) -> 
-                record.expiresAt != null && record.expiresAt.isBefore(now) 
+                record.expiresAt != null && record.expiresAt!!.isBefore(now)
             }.keys
             expiredKeys.forEach { records.remove(it) }
             return expiredKeys.size
@@ -149,7 +150,7 @@ class DeleteExpiredIdempotencyRecordsTaskTest : FunSpec({
         // Verify frequency configuration
         val frequencyConfig = task.frequency()
         frequencyConfig.isPresent shouldBe true
-        frequencyConfig.get().recurs shouldBe Duration.ofMinutes(10)
+        frequencyConfig.get().recurs() shouldBe Optional.of(Duration.ofMinutes(10))
         
         // Verify retry configurations are empty
         task.onFailure().isPresent shouldBe false

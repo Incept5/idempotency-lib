@@ -19,9 +19,9 @@ class IdempotencyHasherTest : FunSpec({
     }
     
     test("should hash a complex object request") {
-        data class TestRequest(val id: String, val value: Int, val nested: NestedObject)
         data class NestedObject(val name: String, val active: Boolean)
-        
+        data class TestRequest(val id: String, val value: Int, val nested: NestedObject)
+
         val request = TestRequest(
             id = "test-id",
             value = 123,

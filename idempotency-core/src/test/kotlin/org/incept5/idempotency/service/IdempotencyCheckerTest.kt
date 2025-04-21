@@ -40,7 +40,7 @@ class IdempotencyCheckerTest : FunSpec({
         override fun deleteExpiredRecords(): Int {
             val now = Instant.now()
             val expiredKeys = records.filter { (_, record) -> 
-                record.expiresAt != null && record.expiresAt.isBefore(now) 
+                record.expiresAt != null && record.expiresAt!!.isBefore(now)
             }.keys
             expiredKeys.forEach { records.remove(it) }
             return expiredKeys.size

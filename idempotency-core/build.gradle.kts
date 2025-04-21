@@ -19,7 +19,7 @@ dependencies {
     // test dependencies
     // kotest
     testImplementation(enforcedPlatform(libs.kotest.bom))
-    testRuntimeOnly("io.kotest:kotest-runner-junit5")
+    testImplementation("io.kotest:kotest-runner-junit5")
 }
 
 tasks.test {

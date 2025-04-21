@@ -10,9 +10,9 @@ class IdempotencyConflictExceptionTest : FunSpec({
         val exception = IdempotencyConflictException()
         
         exception.category shouldBe ErrorCategory.CONFLICT
-        exception.message shouldBe "A request with this Idempotency-Key is already being processed. Please try again later or use a different Idempotency-Key."
+        exception.message shouldBe "Already processing a request with the same Idempotency-Key and context. Please wait for the previous request to complete and try again."
         exception.errors.size shouldBe 1
         exception.errors.first().code shouldBe "IDEMPOTENCY_CONFLICT"
-        exception.errors.first().field shouldBe "Idempotency-Key header"
+        exception.errors.first().location shouldBe "Idempotency-Key"
     }
 })
