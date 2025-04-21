@@ -1,0 +1,25 @@
+quarkus:
+  log:
+    # Note: Allow trace logging to be switched on at runtime but don't enable it by default
+    level: INFO
+    console:
+      format: "%d{yyyy-MM-dd HH:mm:ss,S} %X{correlationId} %-5p - [%c{3.}] (%t) %s%e%n"
+
+    category:
+      "org.incept5":
+        level: DEBUG
+      "okhttp3":
+        level: DEBUG
+
+  datasource:
+    # h2
+    db-kind: postgresql
+
+  flyway:
+    default-schema: example
+    migrate-at-start: true
+    locations: db/migration,incept5/scheduler,incept5/idempotency
+
+task:
+  scheduler:
+    schema: example

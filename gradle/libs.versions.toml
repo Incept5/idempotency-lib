@@ -1,0 +1,74 @@
+[versions]
+
+# Incept5 Libraries
+json-lib = "1.0.6"
+error-lib = "1.0.24"
+http-lib = "1.0.21"
+scheduler-lib = "1.0.14"
+
+
+dependency-analysis = "1.29.0"
+jackson = "2.18.3"
+jakarta = "11.0.0"
+jandex = "1.1.0"
+kotlin = "2.1.20"
+kotlin-logging = "6.0.3"
+ktlint = "12.0.3"
+maven-settings = "0.5"
+quarkus = "3.21.1"
+test-logger = "4.0.0"
+versions = "0.50.0"
+
+# test library versions
+kotest = "5.9.1"
+
+[plugins]
+
+# kotlin
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "kotlin" }
+
+# kotlin linting
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+# gradle versions plugin
+versions = { id = "com.github.ben-manes.versions", version.ref = "versions" }
+# test logging niceness
+test-logger = { id = "com.adarshr.test-logger", version.ref = "test-logger"}
+
+# quarkus
+quarkus = { id = "io.quarkus", version.ref = "quarkus" }
+jandex = { id = "org.kordamp.gradle.jandex", version.ref = "jandex" }
+
+# maven settings
+maven-settings = { id = "net.linguica.maven-settings", version.ref = "maven-settings" }
+
+# dependency hygiene
+dependency-analysis = { id = "com.autonomousapps.dependency-analysis", version.ref = "dependency-analysis"}
+
+
+# Library definitions in alphabetical order
+[libraries]
+
+# incept5 libraries
+incept5-json = { module = "com.github.incept5:json-lib", version.ref = "json-lib" }
+incept5-error-core = { module = "com.github.incept5.error-lib:error-core", version.ref = "error-lib" }
+incept5-error-quarkus = { module = "com.github.incept5.error-lib:error-quarkus", version.ref = "error-lib" }
+incept5-http = { module = "com.github.incept5:http-lib", version.ref = "http-lib" }
+incept5-scheduler-core = { module = "com.github.incept5.scheduler-lib:scheduler-core", version.ref = "scheduler-lib" }
+incept5-scheduler-quarkus = { module = "com.github.incept5.scheduler-lib:scheduler-quarkus", version.ref = "scheduler-lib" }
+
+# jakarta
+jakarta-bom = { module = "jakarta.platform:jakarta.jakartaee-bom", version.ref = "jakarta" }
+
+# jackson bom
+jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+
+
+#quarkus
+quarkus-bom = { group = "io.quarkus.platform", name = "quarkus-bom", version.ref = "quarkus" }
+quarkus-rest-jackson = {module = "io.quarkus:quarkus-rest-jackson", version.ref = "quarkus" }
+
+# kotest
+kotest-bom = { module = "io.kotest:kotest-bom", version.ref = "kotest" }
+

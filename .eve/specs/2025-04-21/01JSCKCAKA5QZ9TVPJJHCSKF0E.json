@@ -1,0 +1,24 @@
+{
+  "spec": "add unit tests to the idempotency-core module",
+  "commitMessage": "Add comprehensive unit tests to idempotency-core module",
+  "stats": {
+    "inputTokens": 401005,
+    "cacheWriteTokens": 6849,
+    "cacheReadTokens": 212319,
+    "outputTokens": 83395,
+    "totalTokens": 0,
+    "cost": 1.8404550000000002,
+    "currency": "gbp",
+    "processingMillis": 1169149,
+    "git": {
+      "filesChanged": 43,
+      "insertions": 3638,
+      "deletions": 0,
+      "linesChanged": 3638,
+      "testFilesChanged": 17,
+      "testInsertions": 1718,
+      "testDeletions": 0,
+      "testLinesChanged": 1718
+    }
+  }
+}
