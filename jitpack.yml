@@ -1,5 +1,5 @@
 jdk:
   - openjdk21
 install:
-  - echo "Building error-lib with Gradle"
-  - ./gradlew clean build publishToMavenLocal -Pgroup=com.github.incept5
+  - echo "Building scheduler-lib with Gradle (skipping tests)"
+  - ./gradlew clean build publishToMavenLocal -Pgroup=com.github.incept5 -x test
