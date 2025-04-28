@@ -1,10 +1,10 @@
 [versions]
 
 # Incept5 Libraries
-json-lib = "1.0.6"
-error-lib = "1.0.24"
-http-lib = "1.0.21"
-scheduler-lib = "1.0.14"
+json-lib = "1.0.10"
+error-lib = "1.0.26"
+http-lib = "1.0.23"
+scheduler-lib = "1.0.22"
 
 
 dependency-analysis = "1.29.0"
