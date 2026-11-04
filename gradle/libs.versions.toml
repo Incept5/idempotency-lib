@@ -4,18 +4,18 @@
 json-lib = "1.0.10"
 error-lib = "1.0.26"
 http-lib = "1.0.23"
-scheduler-lib = "1.0.22"
+scheduler-lib = "1.0.28"
 
 
 dependency-analysis = "1.29.0"
 jackson = "2.18.3"
 jakarta = "11.0.0"
-jandex = "1.1.0"
-kotlin = "2.1.20"
+jandex = "2.3.0"
+kotlin = "2.3.10"
 kotlin-logging = "6.0.3"
 ktlint = "12.0.3"
 maven-settings = "0.5"
-quarkus = "3.21.1"
+quarkus = "3.38.1"
 test-logger = "4.0.0"
 versions = "0.50.0"
 
