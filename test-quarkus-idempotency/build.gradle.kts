@@ -17,7 +17,7 @@ dependencies {
     runtimeOnly("io.quarkus:quarkus-config-yaml")
     runtimeOnly("io.quarkus:quarkus-flyway")
     runtimeOnly("io.quarkus:quarkus-jdbc-postgresql")
-    runtimeOnly(libs.quarkus.rest.jackson)
+    implementation(libs.quarkus.rest.jackson)
 
     api("jakarta.inject:jakarta.inject-api")
     api("jakarta.ws.rs:jakarta.ws.rs-api")
