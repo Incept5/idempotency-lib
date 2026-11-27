@@ -207,8 +207,15 @@ class IdempotencyChecker @JvmOverloads constructor(
             false
         }
         if (retryable) {
-            isolated(options) { recordUpdater.markRetryable(key, context) }
-            return
+            try {
+                isolated(options) { recordUpdater.markRetryable(key, context) }
+                return
+            } catch (unsupported: Throwable) {
+                if (!isUnsupported(unsupported)) throw unsupported
+                // a custom repository without RETRYABLE support: cache the failure as ERROR rather than leave the
+                // key PENDING (and every retry a 409) until it expires
+                LOG.warn("Repository does not support markRetryable, so caching the failure as ERROR for key={} and context={}", key, context, unsupported)
+            }
         }
         val error = if (e is CoreException) {
             // operation threw a CoreException which we need to store in the db for future requests
@@ -238,6 +245,15 @@ class IdempotencyChecker @JvmOverloads constructor(
 
     private fun serialise(result: Any, resultIsString: Boolean): String {
         return if (resultIsString) result as String else Json.toJson(result)
+    }
+
+    private fun isUnsupported(e: Throwable): Boolean {
+        var cause: Throwable? = e
+        while (cause != null) {
+            if (cause is UnsupportedOperationException) return true
+            cause = cause.cause.takeIf { it !== cause }
+        }
+        return false
     }
 
     private fun isDuplicateKey(e: Throwable): Boolean {

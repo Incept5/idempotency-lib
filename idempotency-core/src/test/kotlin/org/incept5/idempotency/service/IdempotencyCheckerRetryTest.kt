@@ -122,6 +122,21 @@ class IdempotencyCheckerRetryTest : FunSpec({
         IdempotencyRetry.unlessRejected(a) shouldBe true
     }
 
+    test("a repository without markRetryable support caches a retryable failure as ERROR instead of leaving it PENDING") {
+        val legacy = object : org.incept5.idempotency.repository.IdempotencyRecordRepository by repository {
+            override fun markRetryable(key: String, context: String) =
+                throw UnsupportedOperationException("no RETRYABLE support")
+        }
+        val legacyChecker = IdempotencyChecker(IdempotencyRecordCreator(legacy, Duration.ofDays(14)), IdempotencyRecordUpdater(legacy), transactions)
+        legacyChecker.idempotencyKey = "key-1"
+        val thrown = shouldThrow<RuntimeException> {
+            legacyChecker.ensureIdempotency<String>(context, hash, retryable) { throw RuntimeException("db down") }
+        }
+        thrown.message shouldBe "db down"
+        thrown.suppressed.toList().shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.ERROR
+    }
+
     test("unlessRejected retries a CoreException in the UNEXPECTED category") {
         shouldThrow<CoreException> {
             checker.ensureIdempotency<String>(context, hash, retryable) { throw rejection(ErrorCategory.UNEXPECTED) }
