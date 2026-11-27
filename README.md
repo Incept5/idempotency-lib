@@ -198,7 +198,10 @@ again.
   `IllegalStateException` before it touches the record.
 - If writing `RETRYABLE` (or `ERROR`) fails, it is tried twice more over about 300ms. If it still fails, the key stays
   `PENDING` (see the known limit below), the failure is logged at ERROR and attached to the operation's exception as
-  suppressed.
+  suppressed. The pauses are `Thread.sleep` on the request thread, so call the checker from a worker thread (as a
+  blocking JAX-RS resource method already is), never from an event-loop thread.
+- `unlessRejected` also treats a JVM `Error` (e.g. `StackOverflowError`) as temporary. `retryOn` only sees a failure
+  once the operation's work has rolled back, so running it again is safe; caching it would pin the key to a 500.
 
 **Only opt in when a failure leaves no side effect**: the operation's database work rolled back and no external call
 was made. Do **not** use `retryOn` for an operation that calls a payment processor or any other external system: a
@@ -216,9 +219,17 @@ only if the key becomes `SUCCESSFUL`. If anything fails the work rolls back, and
 (`ERROR`, or `RETRYABLE` under `retryOn`) is written in its own transaction, so the key is never left `PENDING` by a
 rolled-back attempt.
 
-If the commit itself fails, its outcome may be unclear (e.g. the connection dropped during `COMMIT`). The checker
-re-reads the record: if it is `SUCCESSFUL` the commit did happen and is left alone, so a retry replays the success;
-otherwise the failure is cached as `ERROR` and never retried, even under `retryOn`.
+If the commit itself fails, the checker re-reads the record:
+
+- `SUCCESSFUL`: the commit did happen (e.g. the connection dropped after `COMMIT` was processed). It is left alone, so
+  a retry replays the success.
+- Not `SUCCESSFUL`, and the transaction manager reports a definite rollback (JTA `RollbackException`): nothing
+  committed, so the failure goes to `retryOn` like a failure inside the operation. **This is the common case with
+  Hibernate**, which runs its deferred INSERTs and UPDATEs when the transaction commits, so a database error in the
+  operation's work (a constraint violation, a deadlock, a lost connection mid-flush) surfaces here rather than inside
+  the operation.
+- Not `SUCCESSFUL`, and the outcome is unknown (or the record cannot be read): cached as `ERROR` and never retried,
+  even under `retryOn`, because the work may have committed.
 
 ```kotlin
 IdempotencyOptions(retryOn = IdempotencyRetry.unlessRejected, successInOperationTransaction = true)
@@ -257,8 +268,10 @@ protection for keys in flight. The build fails if the file changes (`verifyIdemp
 - New `IdempotencyOptions` overload of `ensureIdempotency` with `retryOn` (default never) and
   `successInOperationTransaction` (default false). Calls without options behave exactly as in 1.0.13.
 - New `RETRYABLE` record status, and `IdempotencyRetry.unlessRejected`.
-- Any non-default options are refused inside a caller's transaction. A commit failure, or a result of the wrong type
-  or that cannot be serialised, is never marked `RETRYABLE`.
+- Any non-default options are refused inside a caller's transaction. A result of the wrong type or that cannot be
+  serialised is never marked `RETRYABLE`. A failed commit is only offered to `retryOn` when the transaction manager
+  reports a definite rollback (new `IdempotencyTransactions.isDefiniteRollback`, default false; the Quarkus
+  implementation looks for JTA `RollbackException`), which covers a Hibernate flush failing at commit.
 - `IdempotencyRecordRepository` gains `markRetryable` and `claimRetryable`, with default implementations that throw,
   so custom repositories still compile. `markRetryable` is only called when `retryOn` is used; if it is unsupported
   the failure is cached as `ERROR` instead. `claimRetryable` is called whenever a matching `RETRYABLE` record exists
@@ -267,9 +280,12 @@ protection for keys in flight. The build fails if the file changes (`verifyIdemp
 - The `operation` lambda is now `noinline`: a bare `return` from inside it no longer compiles (in 1.0.13 it left the
   key `PENDING`; use `return@ensureIdempotency`), and it can no longer call `suspend` functions from an enclosing
   `suspend` function.
-- `idempotency-quarkus` now depends on `quarkus-narayana-jta` (for `QuarkusTransaction`). Services using a JDBC
-  datasource already have it through Agroal.
-- A duplicate-key `SQLException` wrapped in another exception is now also reported as a 409 conflict.
+- `idempotency-quarkus` now depends on `quarkus-narayana-jta` (for `QuarkusTransaction`), which every consuming
+  service now gets at runtime. Services using Hibernate ORM or a JTA-enabled JDBC datasource already have it; any
+  consumer that did not will now start Narayana and enlist its datasource connections in JTA transactions.
+- **Default-path change:** a duplicate-key `SQLException` wrapped in another exception (anywhere along the cause
+  chain) is now also reported as a 409 conflict. 1.0.13 only recognised a directly thrown `SQLException` and let a
+  wrapped one propagate. This is the only behaviour change for calls without options.
 - The library's `@Transactional(REQUIRES_NEW)` annotations on `IdempotencyRecordCreator`/`IdempotencyRecordUpdater`
   are not applied by Quarkus, because those beans come from producer methods. The default path keeps 1.0.13's
   actual behaviour (each statement auto-commits, or joins the caller's transaction if it has one). Calls with options

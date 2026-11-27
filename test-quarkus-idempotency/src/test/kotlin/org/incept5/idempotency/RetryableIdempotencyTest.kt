@@ -214,6 +214,35 @@ class RetryableIdempotencyTest {
     }
 
     @Test
+    fun `in-transaction success with retry - a failure at commit (an ORM flush) rolls back, is RETRYABLE and the retry succeeds`() {
+        val key = UUID.randomUUID().toString()
+        val name = uniqueName()
+        WidgetService.commitFailures[name] = AtomicInteger(1)
+
+        post(key, name, retry = true, inTx = true).then().statusCode(500)
+        assertEquals(0, widgetService.countWidgets(name), "the work must roll back with the failed commit")
+        assertEquals(IdempotencyStatus.RETRYABLE, record(key)!!.status)
+
+        post(key, name, retry = true, inTx = true).then().statusCode(200)
+        assertEquals(1, widgetService.countWidgets(name))
+        assertEquals(IdempotencyStatus.SUCCESSFUL, record(key)!!.status)
+
+        post(key, name, retry = true, inTx = true).then().statusCode(200)
+        assertEquals(2, WidgetService.runsFor(name))
+    }
+
+    @Test
+    fun `in-transaction success without retry - a failure at commit rolls back and is cached as ERROR`() {
+        val key = UUID.randomUUID().toString()
+        val name = uniqueName()
+        WidgetService.commitFailures[name] = AtomicInteger(1)
+
+        post(key, name, inTx = true).then().statusCode(500)
+        assertEquals(0, widgetService.countWidgets(name))
+        assertEquals(IdempotencyStatus.ERROR, record(key)!!.status)
+    }
+
+    @Test
     fun `in-transaction success - work and status commit together`() {
         val key = UUID.randomUUID().toString()
         val name = uniqueName()

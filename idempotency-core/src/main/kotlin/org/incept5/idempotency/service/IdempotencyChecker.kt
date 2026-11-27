@@ -194,13 +194,20 @@ class IdempotencyChecker @JvmOverloads constructor(
                 recordFailure(key, context, options, e, retryAllowed = false)
                 throw e
             }
-            if (stage == Stage.COMMITTING && commitMayHaveSucceeded(key, context)) {
-                // the commit failed with an unclear outcome and the SUCCESSFUL status (and so the work) is visible:
-                // it did commit. Leave it, so the client's retry replays the success
-                LOG.warn("Commit reported a failure but the SUCCESSFUL status committed for key={} and context={}", key, context, e)
-                throw e
+            var retryAllowed = stage.retryAllowed
+            if (stage == Stage.COMMITTING) {
+                if (commitMayHaveSucceeded(key, context)) {
+                    // the commit failed with an unclear outcome and the SUCCESSFUL status (and so the work) is visible:
+                    // it did commit. Leave it, so the client's retry replays the success
+                    LOG.warn("Commit reported a failure but the SUCCESSFUL status committed for key={} and context={}", key, context, e)
+                    throw e
+                }
+                // An ORM flushes at commit, so this is where most database errors in the operation's work surface.
+                // When the transaction manager says it rolled back, the work went with it and running again is as safe
+                // as after a failure inside the operation. An unknown outcome is still never retried.
+                retryAllowed = transactions.isDefiniteRollback(e)
             }
-            recordFailureWithRetries(key, context, options, e, retryAllowed = stage.retryAllowed)
+            recordFailureWithRetries(key, context, options, e, retryAllowed = retryAllowed)
             throw e
         }
     }
@@ -215,7 +222,10 @@ class IdempotencyChecker @JvmOverloads constructor(
         CONVERTING_RESULT(false),
         /** the SUCCESSFUL write inside our transaction failed: the work rolled back with it */
         WRITING_STATUS_IN_TRANSACTION(true),
-        /** our transaction failed to commit: the work may or may not have committed, so never run it again */
+        /**
+         * our transaction failed to commit: only retried when the transaction manager reports a definite rollback
+         * (IdempotencyTransactions.isDefiniteRollback), because otherwise the work may have committed
+         */
         COMMITTING(false),
         /** the operation returned outside a transaction we control: its work is committed */
         OPERATION_COMMITTED(false),

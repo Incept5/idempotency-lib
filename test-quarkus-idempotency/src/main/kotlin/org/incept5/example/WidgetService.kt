@@ -9,6 +9,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import jakarta.transaction.Synchronization
+import jakarta.transaction.TransactionSynchronizationRegistry
 import javax.sql.DataSource
 
 /**
@@ -16,15 +18,21 @@ import javax.sql.DataSource
  * - "reject..." throws a CoreException(VALIDATION) after writing, i.e. a deterministic rejection
  * - [transientFailures] makes the next N calls for a name throw an IllegalStateException after writing
  * - [gates] holds a call (after it has been counted in [entered]) until the test releases it
+ * - [commitFailures] makes the next N calls for a name fail at commit, in beforeCompletion, which is where an ORM such
+ *   as Hibernate runs its deferred SQL: the call returns normally and the error surfaces when the transaction commits
  */
 @ApplicationScoped
-class WidgetService(private val dataSource: DataSource) {
+class WidgetService(
+    private val dataSource: DataSource,
+    private val synchronizations: TransactionSynchronizationRegistry,
+) {
 
     companion object {
         val runs = ConcurrentHashMap<String, AtomicInteger>()
         val transientFailures = ConcurrentHashMap<String, AtomicInteger>()
         val entered = ConcurrentHashMap<String, CountDownLatch>()
         val gates = ConcurrentHashMap<String, CountDownLatch>()
+        val commitFailures = ConcurrentHashMap<String, AtomicInteger>()
 
         fun runsFor(name: String): Int = runs[name]?.get() ?: 0
     }
@@ -43,6 +51,12 @@ class WidgetService(private val dataSource: DataSource) {
             }
         }
 
+        if ((commitFailures[command.name]?.getAndDecrement() ?: 0) > 0) {
+            synchronizations.registerInterposedSynchronization(object : Synchronization {
+                override fun beforeCompletion() = throw IllegalStateException("simulated flush failure at commit for ${command.name}")
+                override fun afterCompletion(status: Int) {}
+            })
+        }
         if (command.name.startsWith("reject")) {
             throw CoreException(
                 category = ErrorCategory.VALIDATION,

@@ -22,6 +22,16 @@ interface IdempotencyTransactions {
      */
     fun isTransactionActive(): Boolean
 
+    /**
+     * True only if [commitFailure], thrown by [requiresNew] after its block returned, proves the transaction rolled
+     * back (for JTA, a RollbackException: a before-completion step such as an ORM flush failed, or the transaction
+     * was marked rollback-only). False when the outcome is unknown or the failure came from the block itself.
+     *
+     * The checker uses this to offer a retry after a failed commit. The default never claims a rollback, so an
+     * implementation that cannot tell caches the failure, which is the safe answer.
+     */
+    fun isDefiniteRollback(commitFailure: Throwable): Boolean = false
+
     companion object {
         /**
          * No transaction management: every statement auto-commits, as the 1.0.13 library effectively ran.

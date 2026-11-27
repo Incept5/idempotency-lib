@@ -78,6 +78,8 @@ class FakeTransactions(
     /** the requiresNew call (counting from 1) whose commit fails; [commitFailureCommits] says whether it committed anyway */
     var failCommitOfCall: Int? = null
     var commitFailureCommits = false
+    /** whether a commit failure that rolled back is reported as a definite rollback (as JTA's RollbackException is) */
+    var commitFailureIsDefiniteRollback = false
 
     /** set to simulate a caller that is already in a transaction */
     var callerTransactionActive = false
@@ -103,7 +105,8 @@ class FakeTransactions(
             repository.records.putAll(recordsBefore)
             work.clear()
             work.addAll(workBefore)
-            throw IllegalStateException("simulated commit failure, rolled back")
+            if (commitFailureIsDefiniteRollback) throw DefiniteRollback()
+            throw IllegalStateException("simulated commit failure, outcome unknown")
         } catch (e: Throwable) {
             repository.records.clear()
             repository.records.putAll(recordsBefore)
@@ -116,7 +119,12 @@ class FakeTransactions(
     }
 
     override fun isTransactionActive(): Boolean = inTransaction || callerTransactionActive
+
+    override fun isDefiniteRollback(commitFailure: Throwable): Boolean = commitFailure is DefiniteRollback
 }
+
+/** stands in for jakarta.transaction.RollbackException thrown from commit */
+class DefiniteRollback : IllegalStateException("simulated commit failure, rolled back")
 
 private class CommitFailedException : RuntimeException()
 private class CommittedButReportedFailure : RuntimeException()

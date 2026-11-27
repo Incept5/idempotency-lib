@@ -14,6 +14,11 @@ import java.time.Instant
  * This service is responsible for creating idempotency records
  * It is important that a new db transaction is used to do this so that we
  * can detect overlapping requests
+ *
+ * Note: idempotency-quarkus builds this class in a producer method, and CDI does not apply interceptors to producer
+ * results, so the @Transactional annotation on [ensureRecord] has no effect there (it is kept as it was in 1.0.13).
+ * With default options each statement auto-commits, or joins the caller's transaction; with non-default options
+ * IdempotencyChecker runs ensureRecord in a new transaction through IdempotencyTransactions.
  */
 class IdempotencyRecordCreator(
     private val repository: IdempotencyRecordRepository,

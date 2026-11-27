@@ -362,7 +362,34 @@ class IdempotencyCheckerRetryTest : FunSpec({
         record().status shouldBe IdempotencyStatus.SUCCESSFUL
     }
 
-    test("in-transaction success with unlessRejected: a commit that fails and rolls back is cached as ERROR, never retried") {
+    test("in-transaction success with unlessRejected: a commit that definitely rolled back (e.g. a failed flush) is RETRYABLE and the retry succeeds") {
+        // call 1 creates the record, call 2 runs the operation
+        transactions.failCommitOfCall = 2
+        transactions.commitFailureIsDefiniteRollback = true
+        var runs = 0
+        shouldThrow<DefiniteRollback> {
+            checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; work.add("row"); "ok" }
+        }
+        work.shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.RETRYABLE
+
+        checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; work.add("row"); "ok" } shouldBe "ok"
+        work shouldContainExactly listOf("row")
+        record().status shouldBe IdempotencyStatus.SUCCESSFUL
+        runs shouldBe 2
+    }
+
+    test("in-transaction success without retryOn: a commit that definitely rolled back is cached as ERROR") {
+        transactions.failCommitOfCall = 2
+        transactions.commitFailureIsDefiniteRollback = true
+        shouldThrow<DefiniteRollback> {
+            checker.ensureIdempotency<String>(context, hash, inTx) { work.add("row"); "ok" }
+        }
+        work.shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.ERROR
+    }
+
+    test("in-transaction success with unlessRejected: a commit with an unknown outcome that left no SUCCESSFUL status is cached as ERROR, never retried") {
         // call 1 creates the record, call 2 runs the operation
         transactions.failCommitOfCall = 2
         var runs = 0
@@ -375,6 +402,16 @@ class IdempotencyCheckerRetryTest : FunSpec({
             checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; work.add("row"); "ok" }
         }
         runs shouldBe 1
+    }
+
+    test("default options claim a RETRYABLE record for the same request and run it again") {
+        shouldThrow<RuntimeException> {
+            checker.ensureIdempotency<String>(context, hash, retryable) { throw RuntimeException("db down") }
+        }
+        record().status shouldBe IdempotencyStatus.RETRYABLE
+
+        checker.ensureIdempotency<String>(context, hash) { "ok" } shouldBe "ok"
+        record().status shouldBe IdempotencyStatus.SUCCESSFUL
     }
 
     test("in-transaction success with unlessRejected: a commit that reports failure but committed keeps SUCCESSFUL") {

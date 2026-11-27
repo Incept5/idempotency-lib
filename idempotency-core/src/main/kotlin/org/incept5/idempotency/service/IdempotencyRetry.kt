@@ -21,7 +21,10 @@ object IdempotencyRetry {
      * gets the same answer. A rejection carried as a suppressed exception counts too, because that is the error
      * ErrorHolder.fromThrowable caches for it. A rejection wrapped as a cause (for example in a CompletionException
      * or a proxy's wrapper exception) counts as well, so it is not re-run on every retry. Everything else (an
-     * UNEXPECTED CoreException, or any other exception) is treated as temporary.
+     * UNEXPECTED CoreException, any other exception, or a JVM Error such as OutOfMemoryError or StackOverflowError)
+     * is treated as temporary. Errors are included deliberately: retryOn is only reached once the operation's work
+     * has rolled back, so running it again is safe, whereas caching an Error would pin the key to a 500 for its
+     * lifetime. (The default options do not record Errors at all, as in 1.0.13, leaving the key PENDING.)
      */
     @JvmField
     val unlessRejected: (Throwable) -> Boolean = { e -> rejectionIn(e) == null }
