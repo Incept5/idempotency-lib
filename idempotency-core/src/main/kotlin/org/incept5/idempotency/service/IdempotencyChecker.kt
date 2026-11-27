@@ -91,11 +91,15 @@ class IdempotencyChecker @JvmOverloads constructor(
                 "IdempotencyOptions.successInOperationTransaction needs an IdempotencyTransactions implementation " +
                     "(the idempotency-quarkus module provides one)"
             }
-            // if we joined a caller's transaction, the SUCCESSFUL write would only commit when the caller's transaction
-            // does: a later rollback would leave the key PENDING (409 until it expires) with no work done
+        }
+        if (!options.isDefault) {
+            // non-default options write the record's status in transactions of their own. Inside a caller's transaction
+            // the operation's work would only commit (or roll back) when the caller's does, after a SUCCESSFUL or
+            // RETRYABLE status had already committed: a later rollback would replay a success for work that never
+            // happened, or let a retry repeat work that did
             check(!transactions.isTransactionActive()) {
-                "IdempotencyOptions.successInOperationTransaction must be called outside a transaction: the checker " +
-                    "opens the transaction the operation runs in. Remove @Transactional from the caller."
+                "IdempotencyOptions other than the defaults must be used outside a transaction: the checker controls " +
+                    "the transactions the operation and its status run in. Remove @Transactional from the caller."
             }
         }
 

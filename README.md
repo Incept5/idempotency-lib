@@ -191,6 +191,10 @@ again.
 - A key freed by a temporary failure stays bound to the request it was first used for. A different payload sent
   with it gets `IDEMPOTENCY_HASH_MISMATCH` (400), the same as after a success or a rejection.
 - A retry does not extend the key's life: a `RETRYABLE` record keeps its original `expires_at`.
+- Must be called outside a transaction (no `@Transactional` on the resource method), as with
+  `successInOperationTransaction` below: inside a caller's transaction the operation's work commits later than its
+  status, so a rollback could replay a success that never happened. The checker refuses such a call with an
+  `IllegalStateException` before it touches the record.
 
 **Only opt in when a failure leaves no side effect**: the operation's database work rolled back and no external call
 was made. Do **not** use `retryOn` for an operation that calls a payment processor or any other external system: a
@@ -218,9 +222,9 @@ Things that change when you opt in:
 - Use cases that commit in several steps (e.g. persist state, call a payment processor, then record the outcome)
   are merged into one transaction held open across the external call. Leave those on the default.
 - Work the operation does in its own `REQUIRES_NEW` transaction, or an external call it makes, is not rolled back.
-- Must be called outside a transaction (no `@Transactional` on the resource method): if the checker joined a caller's
-  transaction that later rolled back, the key would be left `PENDING`. The checker refuses such a call with an
-  `IllegalStateException` before it touches the record.
+- Must be called outside a transaction (no `@Transactional` on the resource method), as must any non-default
+  options: if the checker joined a caller's transaction that later rolled back, the key would be left `PENDING`. The
+  checker refuses such a call with an `IllegalStateException` before it touches the record.
 - Requires the `idempotency-quarkus` module (or your own `IdempotencyTransactions` implementation passed to
   `IdempotencyChecker`).
 
@@ -244,6 +248,7 @@ protection for keys in flight. The build fails if the file changes (`verifyIdemp
 - New `IdempotencyOptions` overload of `ensureIdempotency` with `retryOn` (default never) and
   `successInOperationTransaction` (default false). Calls without options behave exactly as in 1.0.13.
 - New `RETRYABLE` record status, and `IdempotencyRetry.unlessRejected`.
+- Any non-default options are refused inside a caller's transaction.
 - `IdempotencyRecordRepository` gains `markRetryable` and `claimRetryable`, with default implementations that throw,
   so custom repositories still compile; they are only called when `retryOn` is used.
 - The `operation` lambda is now `noinline`: a bare `return` from inside it no longer compiles (in 1.0.13 it left the

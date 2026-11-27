@@ -288,6 +288,22 @@ class IdempotencyCheckerRetryTest : FunSpec({
         thrown.suppressed.single().message shouldBe "simulated failure writing ERROR"
     }
 
+    test("retryOn without in-transaction success inside a caller's transaction fails before touching the record") {
+        transactions.callerTransactionActive = true
+        var ran = false
+        shouldThrow<IllegalStateException> {
+            checker.ensureIdempotency<String>(context, hash, retryable) { ran = true; "ok" }
+        }
+        ran shouldBe false
+        repository.findRecordByKeyAndContext("key-1", context) shouldBe null
+    }
+
+    test("default options inside a caller's transaction still run, as in 1.0.13") {
+        transactions.callerTransactionActive = true
+        checker.ensureIdempotency<String>(context, hash) { "ok" } shouldBe "ok"
+        record().status shouldBe IdempotencyStatus.SUCCESSFUL
+    }
+
     test("a result of the wrong type is cached as ERROR on the default path, as in 1.0.13") {
         shouldThrow<ClassCastException> {
             checker.ensureIdempotency<Result>(context, hash) { "not a Result" }

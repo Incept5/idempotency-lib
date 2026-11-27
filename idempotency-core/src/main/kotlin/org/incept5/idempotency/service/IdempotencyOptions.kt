@@ -9,7 +9,8 @@ package org.incept5.idempotency.service
  * @param retryOn decides whether an exception thrown by the operation is temporary. When it returns true the record is
  * marked RETRYABLE instead of being cached as ERROR, and the same request (same key and request hash) may run the
  * operation again. A failure after the operation has returned outside the checker's transaction (serialising the
- * result, writing the status) is always cached, because the operation's work has already committed. Only safe when a failure leaves no side effect: the operation's work rolled back and no external call
+ * result, writing the status) is always cached, because the operation's work has already committed. Any non-default
+ * options are refused (IllegalStateException) when called inside a transaction. Only safe when a failure leaves no side effect: the operation's work rolled back and no external call
  * (e.g. to a payment processor) was made. See [IdempotencyRetry] for ready-made predicates.
  *
  * @param successInOperationTransaction when true, the operation and the SUCCESSFUL status write run in one
