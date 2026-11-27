@@ -37,7 +37,7 @@ val verifyIdempotencyMigrationUnchanged by tasks.registering {
     inputs.file(script)
     doLast {
         val actual = MessageDigest.getInstance("SHA-256")
-            .digest(script.readBytes())
+            .digest(script.readText().replace("\r\n", "\n").toByteArray()) // ignore line endings, as Flyway does
             .joinToString("") { "%02x".format(it) }
         if (actual != expectedSha256) {
             throw GradleException(
