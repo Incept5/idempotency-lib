@@ -316,13 +316,34 @@ class IdempotencyCheckerRetryTest : FunSpec({
         record().status shouldBe IdempotencyStatus.RETRYABLE
     }
 
-    test("if recording the failure fails, the operation's exception is still the one thrown") {
+    test("a failed write of the failure is retried, so a brief outage does not leave the key PENDING") {
         repository.failNextUpdateTo = IdempotencyStatus.ERROR
         val thrown = shouldThrow<CoreException> {
             checker.ensureIdempotency<String>(context, hash, retryable) { throw rejection() }
         }
         thrown.errors.first().code shouldBe "REJECTED"
+        thrown.suppressed.toList().shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.ERROR
+    }
+
+    test("a failed markRetryable is retried and the key ends RETRYABLE") {
+        repository.markRetryableFailures = 2
+        val thrown = shouldThrow<RuntimeException> {
+            checker.ensureIdempotency<String>(context, hash, retryable) { throw RuntimeException("db down") }
+        }
+        thrown.suppressed.toList().shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.RETRYABLE
+    }
+
+    test("if recording the failure keeps failing, the operation's exception is still the one thrown") {
+        repository.failNextUpdateTo = IdempotencyStatus.ERROR
+        repository.updateFailures = 3
+        val thrown = shouldThrow<CoreException> {
+            checker.ensureIdempotency<String>(context, hash, retryable) { throw rejection() }
+        }
+        thrown.errors.first().code shouldBe "REJECTED"
         thrown.suppressed.single().message shouldBe "simulated failure writing ERROR"
+        record().status shouldBe IdempotencyStatus.PENDING
     }
 
     test("retryOn without in-transaction success inside a caller's transaction fails before touching the record") {

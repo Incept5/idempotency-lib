@@ -16,6 +16,12 @@ class InMemoryIdempotencyRepository : IdempotencyRecordRepository {
     /** set to make the next status write of this status fail */
     var failNextUpdateTo: IdempotencyStatus? = null
 
+    /** how many consecutive writes of [failNextUpdateTo] fail */
+    var updateFailures = 1
+
+    /** how many calls of markRetryable fail */
+    var markRetryableFailures = 0
+
     override fun createRecord(record: IdempotencyRecord) {
         if (records.containsKey(record.key to record.context)) {
             throw SQLException("unique constraint violation: idempotency_records_pkey")
@@ -28,13 +34,17 @@ class InMemoryIdempotencyRepository : IdempotencyRecordRepository {
 
     override fun updateRecordStatus(key: String, context: String, status: IdempotencyStatus, response: String) {
         if (failNextUpdateTo == status) {
-            failNextUpdateTo = null
+            if (--updateFailures <= 0) failNextUpdateTo = null
             throw SQLException("simulated failure writing $status")
         }
         records[key to context]?.let { records[key to context] = it.copy(status = status, response = response) }
     }
 
     override fun markRetryable(key: String, context: String) {
+        if (markRetryableFailures > 0) {
+            markRetryableFailures--
+            throw SQLException("simulated failure marking RETRYABLE")
+        }
         val record = records[key to context] ?: return
         if (record.status == IdempotencyStatus.PENDING) {
             records[key to context] = record.copy(status = IdempotencyStatus.RETRYABLE, response = null)

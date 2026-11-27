@@ -48,6 +48,11 @@ class IdempotencyChecker @JvmOverloads constructor(
 
     private val LOG = LoggerFactory.getLogger(IdempotencyChecker::class.java)
 
+    private companion object {
+        /** pauses before each further attempt to record a failure (non-default options only) */
+        val FAILURE_WRITE_BACKOFF_MILLIS = longArrayOf(50, 250)
+    }
+
     // this will get set by the filter from Idempotency-Key header
     var idempotencyKey: String? = null
 
@@ -195,11 +200,7 @@ class IdempotencyChecker @JvmOverloads constructor(
                 LOG.warn("Commit reported a failure but the SUCCESSFUL status committed for key={} and context={}", key, context, e)
                 throw e
             }
-            try {
-                recordFailure(key, context, options, e, retryAllowed = stage.retryAllowed)
-            } catch (recordingFailure: Throwable) {
-                e.addSuppressed(recordingFailure)
-            }
+            recordFailureWithRetries(key, context, options, e, retryAllowed = stage.retryAllowed)
             throw e
         }
     }
@@ -231,6 +232,36 @@ class IdempotencyChecker @JvmOverloads constructor(
             LOG.error("Could not read the idempotency record for key={} and context={} after a failed commit, so it " +
                 "stays PENDING (409 until it expires)", key, context, readFailure)
             true
+        }
+    }
+
+    /**
+     * recordFailure for non-default options, retried a few times so that a brief database outage (often the very
+     * failure retryOn is for) does not leave the key PENDING, answering 409 until it expires. The operation's
+     * exception is always the one thrown; a write that still fails is attached to it as suppressed.
+     */
+    private fun recordFailureWithRetries(key: String, context: String, options: IdempotencyOptions, e: Throwable, retryAllowed: Boolean) {
+        var attempt = 0
+        while (true) {
+            try {
+                recordFailure(key, context, options, e, retryAllowed)
+                return
+            } catch (recordingFailure: Throwable) {
+                if (recordingFailure !is Exception || attempt >= FAILURE_WRITE_BACKOFF_MILLIS.size) {
+                    LOG.error("Could not record the failure for key={} and context={}, so the key stays PENDING " +
+                        "(409 until it expires)", key, context, recordingFailure)
+                    e.addSuppressed(recordingFailure)
+                    return
+                }
+                LOG.warn("Recording the failure for key={} and context={} failed, retrying", key, context, recordingFailure)
+                try {
+                    Thread.sleep(FAILURE_WRITE_BACKOFF_MILLIS[attempt++])
+                } catch (interrupted: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    e.addSuppressed(recordingFailure)
+                    return
+                }
+            }
         }
     }
 

@@ -196,6 +196,9 @@ again.
   `successInOperationTransaction` below: inside a caller's transaction the operation's work commits later than its
   status, so a rollback could replay a success that never happened. The checker refuses such a call with an
   `IllegalStateException` before it touches the record.
+- If writing `RETRYABLE` (or `ERROR`) fails, it is tried twice more over about 300ms. If it still fails, the key stays
+  `PENDING` (see the known limit below), the failure is logged at ERROR and attached to the operation's exception as
+  suppressed.
 
 **Only opt in when a failure leaves no side effect**: the operation's database work rolled back and no external call
 was made. Do **not** use `retryOn` for an operation that calls a payment processor or any other external system: a
@@ -236,7 +239,8 @@ Things that change when you opt in:
 ### Known Limit: Crashes Leave PENDING
 
 A process that dies after the record is created and before the operation finishes leaves the record `PENDING`.
-Every request with that key then gets a 409 until the record expires (14 days by default). This is unchanged by the
+Every request with that key then gets a 409 until the record expires (14 days by default). The same happens if the
+database stays unavailable for longer than the retried failure write (see `retryOn` above). This is unchanged by the
 options above. A possible future option is to treat a `PENDING` record older than N minutes as abandoned.
 
 ### Do Not Edit the Flyway Script
