@@ -189,6 +189,27 @@ class RetryableIdempotencyTest {
     }
 
     @Test
+    fun `retryOn alone inside a caller's transaction is refused before the record is touched`() {
+        val key = UUID.randomUUID().toString()
+        val name = uniqueName()
+
+        RestAssured.given()
+            .contentType("application/json")
+            .header("Idempotency-Key", key)
+            .queryParam("retry", true)
+            .queryParam("inTx", false)
+            .body(ExampleCommand(orgId, name))
+            .`when`()
+            .post("/widgets/in-caller-transaction")
+            .then()
+            .statusCode(500)
+
+        assertNull(record(key))
+        assertEquals(0, WidgetService.runsFor(name))
+        assertEquals(0, widgetService.countWidgets(name))
+    }
+
+    @Test
     fun `in-transaction success - work and status commit together`() {
         val key = UUID.randomUUID().toString()
         val name = uniqueName()

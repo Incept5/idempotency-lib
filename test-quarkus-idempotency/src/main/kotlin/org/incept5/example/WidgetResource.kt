@@ -1,6 +1,7 @@
 package org.incept5.example
 
 import jakarta.transaction.Transactional
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.QueryParam
@@ -35,17 +36,25 @@ class WidgetResource(
     }
 
     /**
-     * Misuse: in-transaction success from inside a caller's transaction, which the checker must refuse
+     * Misuse: non-default options from inside a caller's transaction, which the checker must refuse.
+     * Defaults to in-transaction success; retry=true&inTx=false tries retryOn alone.
      */
     @POST
     @Path("/in-caller-transaction")
     @Transactional
-    fun createWidgetInCallerTransaction(request: ExampleRequest): WidgetResult {
+    fun createWidgetInCallerTransaction(
+        request: ExampleRequest,
+        @QueryParam("retry") retry: Boolean,
+        @QueryParam("inTx") @DefaultValue("true") inTx: Boolean,
+    ): WidgetResult {
         val command = ExampleCommand(request.orgId!!, request.name!!)
         return idempotencyChecker.ensureIdempotency<WidgetResult>(
             command.orgId,
             IdempotencyHasher.hashRequest(command),
-            IdempotencyOptions(successInOperationTransaction = true),
+            IdempotencyOptions(
+                retryOn = if (retry) IdempotencyRetry.unlessRejected else IdempotencyRetry.never,
+                successInOperationTransaction = inTx,
+            ),
         ) {
             widgetService.create(command)
         }
