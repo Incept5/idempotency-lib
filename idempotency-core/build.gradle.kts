@@ -1,3 +1,6 @@
+import java.security.MessageDigest
+
+
 plugins {
     // Apply the java-library plugin for API and implementation separation.
     `java-library`
@@ -24,6 +27,29 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// R__01_idempotency_record.sql is a Flyway repeatable migration that starts with DROP TABLE: any change to its
+// checksum wipes every consuming service's idempotency records on their next deploy. Fail the build if it changes.
+val verifyIdempotencyMigrationUnchanged by tasks.registering {
+    val script = file("src/main/resources/incept5/idempotency/R__01_idempotency_record.sql")
+    val expectedSha256 = "b08b394249443494820bc947bdbad9805c3fdd41d7d8bbb80aaf576dbe4c61a8" // as released in 1.0.13
+    inputs.file(script)
+    doLast {
+        val actual = MessageDigest.getInstance("SHA-256")
+            .digest(script.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        if (actual != expectedSha256) {
+            throw GradleException(
+                "${script.name} has changed (sha256 $actual, expected $expectedSha256). It drops and recreates " +
+                    "idempotency_records in every consuming service when its checksum changes. Revert the change."
+            )
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyIdempotencyMigrationUnchanged)
 }
 
 publishing {

@@ -5,6 +5,7 @@ import org.incept5.idempotency.repository.SqlIdempotencyRecordRepository
 import org.incept5.idempotency.service.IdempotencyChecker
 import org.incept5.idempotency.service.IdempotencyRecordCreator
 import org.incept5.idempotency.service.IdempotencyRecordUpdater
+import org.incept5.idempotency.service.IdempotencyTransactions
 import org.incept5.idempotency.tasks.DeleteExpiredIdempotencyRecordsTask
 import jakarta.enterprise.context.RequestScoped
 import jakarta.inject.Singleton
@@ -35,9 +36,18 @@ class IdempotencyBeanFactory {
         return IdempotencyRecordUpdater(repository)
     }
 
+    @Singleton
+    fun idempotencyTransactions(): IdempotencyTransactions {
+        return QuarkusIdempotencyTransactions()
+    }
+
     @RequestScoped
-    fun idempotencyChecker(creator: IdempotencyRecordCreator, updater: IdempotencyRecordUpdater): IdempotencyChecker {
-        return IdempotencyChecker(creator, updater)
+    fun idempotencyChecker(
+        creator: IdempotencyRecordCreator,
+        updater: IdempotencyRecordUpdater,
+        transactions: IdempotencyTransactions
+    ): IdempotencyChecker {
+        return IdempotencyChecker(creator, updater, transactions)
     }
 
     @Singleton

@@ -19,6 +19,10 @@ import java.time.Instant
  *
  * If the status is ERROR we will return the same error response as the original request
  *
+ * If the status is RETRYABLE the previous attempt failed temporarily (see IdempotencyOptions.retryOn)
+ * and the same request may claim the record and run again. The record keeps its request hash, so a
+ * different request sent with the key is still rejected.
+ *
  * If the record does not exist we will create a new one with the status PENDING but that could
  * cause a db constraint violation if the record is created by another request in the meantime
  * in which case we will return a 409 Conflict
@@ -39,5 +43,14 @@ data class IdempotencyRecord(
 enum class IdempotencyStatus {
     PENDING,
     SUCCESSFUL,
-    ERROR
+    ERROR,
+
+    /**
+     * The last attempt failed in a way the caller marked as temporary, so the same request may run again.
+     * Only written when a caller opts in with IdempotencyOptions.retryOn.
+     *
+     * Rolling deploys: a 1.0.13 (or older) instance cannot parse this value and fails with a 500 for the key
+     * before it runs the operation, so nothing is cached or duplicated.
+     */
+    RETRYABLE
 }
