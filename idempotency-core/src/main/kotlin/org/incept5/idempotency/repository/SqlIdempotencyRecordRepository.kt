@@ -62,6 +62,33 @@ class SqlIdempotencyRecordRepository(private val dataSource: DataSource, private
         }
     }
 
+    override fun markRetryable(key: String, context: String) {
+        dataSource.connection.use { conn ->
+            val sql = "UPDATE $tableName SET status = ?, response = NULL WHERE key = ? AND context = ? AND status = ?"
+            conn.prepareStatement(sql).use { stmt ->
+                stmt.setString(1, IdempotencyStatus.RETRYABLE.name)
+                stmt.setString(2, key)
+                stmt.setString(3, context)
+                stmt.setString(4, IdempotencyStatus.PENDING.name)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    override fun claimRetryable(key: String, context: String, requestHash: String): Boolean {
+        dataSource.connection.use { conn ->
+            val sql = "UPDATE $tableName SET status = ? WHERE key = ? AND context = ? AND status = ? AND request_hash = ?"
+            conn.prepareStatement(sql).use { stmt ->
+                stmt.setString(1, IdempotencyStatus.PENDING.name)
+                stmt.setString(2, key)
+                stmt.setString(3, context)
+                stmt.setString(4, IdempotencyStatus.RETRYABLE.name)
+                stmt.setString(5, requestHash)
+                return stmt.executeUpdate() == 1
+            }
+        }
+    }
+
     /**
      * Delete records that have expired and are no longer needed.
      */

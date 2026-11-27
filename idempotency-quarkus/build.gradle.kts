@@ -16,6 +16,8 @@ dependencies {
 
     api(platform(libs.quarkus.bom))
     implementation("io.quarkus:quarkus-core")
+    // QuarkusTransaction, for the transactions the IdempotencyChecker demarcates itself
+    implementation("io.quarkus:quarkus-narayana-jta")
     api("jakarta.annotation:jakarta.annotation-api")
     api("jakarta.enterprise:jakarta.enterprise.cdi-api")
     api("jakarta.inject:jakarta.inject-api")

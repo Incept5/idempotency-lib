@@ -158,3 +158,139 @@ idempotency:
 ```
 
 The duration uses the ISO-8601 duration format (e.g., P1D for 1 day, PT12H for 12 hours).
+
+### Failures: Cached by Default, Retryable on Request
+
+By default every exception the operation throws is cached as an `ERROR` and replayed for the same key, so a retry
+gets the same error without the operation running again. That is right for a deterministic rejection (a 4xx), but
+it also caches temporary failures such as a dropped database connection, and the client then needs a new key.
+
+Pass `IdempotencyOptions` with a `retryOn` policy to let temporary failures be retried with the same key:
+
+```kotlin
+val response = idempotencyChecker.ensureIdempotency<ExampleResponse>(
+    command.orgId,
+    requestHash,
+    IdempotencyOptions(retryOn = IdempotencyRetry.unlessRejected),
+) {
+    exampleService.createExample(command)
+}
+```
+
+When `retryOn` returns `true` for the exception the operation threw, the record is marked `RETRYABLE` instead of
+`ERROR` and the exception is rethrown. A failure *after* the operation has returned (serialising its result, or writing
+the `SUCCESSFUL` status) is always cached as `ERROR`, because the operation's work is already committed and a retry
+would run it twice. Use `successInOperationTransaction` (below) to make a failed status write roll the work back and
+become retryable too (a result of the wrong type, or one that cannot be serialised, is still cached as `ERROR`: it
+would fail the same way every time). The next request with the same key **and the same request hash** claims the record (one
+conditional update, so of two concurrent retries exactly one runs and the other gets a 409) and runs the operation
+again.
+
+- `IdempotencyRetry.unlessRejected` retries everything except a `CoreException` in a 4xx category (anything but
+  `UNEXPECTED`), including one attached as a suppressed exception or wrapped as a cause. Rejections stay cached.
+- `IdempotencyRetry.never` is the default.
+- A key freed by a temporary failure stays bound to the request it was first used for. A different payload sent
+  with it gets `IDEMPOTENCY_HASH_MISMATCH` (400), the same as after a success or a rejection.
+- A retry does not extend the key's life: a `RETRYABLE` record keeps its original `expires_at`.
+- Must be called outside a transaction (no `@Transactional` on the resource method), as with
+  `successInOperationTransaction` below: inside a caller's transaction the operation's work commits later than its
+  status, so a rollback could replay a success that never happened. The checker refuses such a call with an
+  `IllegalStateException` before it touches the record.
+- If writing `RETRYABLE` (or `ERROR`) fails, it is tried twice more over about 300ms. If it still fails, the key stays
+  `PENDING` (see the known limit below), the failure is logged at ERROR and attached to the operation's exception as
+  suppressed. The pauses are `Thread.sleep` on the request thread, so call the checker from a worker thread (as a
+  blocking JAX-RS resource method already is), never from an event-loop thread.
+- `unlessRejected` also treats a JVM `Error` (e.g. `StackOverflowError`) as temporary. `retryOn` only sees a failure
+  once the operation's work has rolled back, so running it again is safe; caching it would pin the key to a 500.
+
+**Only opt in when a failure leaves no side effect**: the operation's database work rolled back and no external call
+was made. Do **not** use `retryOn` for an operation that calls a payment processor or any other external system: a
+failure after that call succeeded would run the call again on retry.
+
+### Writing Success in the Operation's Transaction
+
+By default the operation's own `@Transactional` work commits first and the library then writes `SUCCESSFUL` in a
+separate transaction. If that write fails (or the process dies in between) the work is committed but the key is not
+`SUCCESSFUL`.
+
+Set `successInOperationTransaction = true` to run the operation and the `SUCCESSFUL` write in one transaction that the
+checker opens. A `@Transactional` (REQUIRED) use case called from the operation joins it, so the work commits if and
+only if the key becomes `SUCCESSFUL`. If anything fails the work rolls back, and the failure
+(`ERROR`, or `RETRYABLE` under `retryOn`) is written in its own transaction, so the key is never left `PENDING` by a
+rolled-back attempt.
+
+If the commit itself fails, the checker re-reads the record:
+
+- `SUCCESSFUL`: the commit did happen (e.g. the connection dropped after `COMMIT` was processed). It is left alone, so
+  a retry replays the success.
+- Not `SUCCESSFUL`, and the transaction manager reports a definite rollback (JTA `RollbackException`): nothing
+  committed, so the failure goes to `retryOn` like a failure inside the operation. **This is the common case with
+  Hibernate**, which runs its deferred INSERTs and UPDATEs when the transaction commits, so a database error in the
+  operation's work (a constraint violation, a deadlock, a lost connection mid-flush) surfaces here rather than inside
+  the operation.
+- Not `SUCCESSFUL`, and the outcome is unknown (or the record cannot be read): cached as `ERROR` and never retried,
+  even under `retryOn`, because the work may have committed.
+
+```kotlin
+IdempotencyOptions(retryOn = IdempotencyRetry.unlessRejected, successInOperationTransaction = true)
+```
+
+Things that change when you opt in:
+
+- The operation's work commits later: at the end of `ensureIdempotency`, after the result has been serialised.
+- Use cases that commit in several steps (e.g. persist state, call a payment processor, then record the outcome)
+  are merged into one transaction held open across the external call. Leave those on the default.
+- Work the operation does in its own `REQUIRES_NEW` transaction, or an external call it makes, is not rolled back.
+- Must be called outside a transaction (no `@Transactional` on the resource method), as must any non-default
+  options: if the checker joined a caller's transaction that later rolled back, the key would be left `PENDING`. The
+  checker refuses such a call with an `IllegalStateException` before it touches the record.
+- Requires the `idempotency-quarkus` module (or your own `IdempotencyTransactions` implementation passed to
+  `IdempotencyChecker`).
+
+### Known Limit: Crashes Leave PENDING
+
+A process that dies after the record is created and before the operation finishes leaves the record `PENDING`.
+Every request with that key then gets a 409 until the record expires (14 days by default). The same happens if the
+database stays unavailable for longer than the retried failure write (see `retryOn` above). This is unchanged by the
+options above. A possible future option is to treat a `PENDING` record older than N minutes as abandoned.
+
+### Do Not Edit the Flyway Script
+
+`incept5/idempotency/R__01_idempotency_record.sql` is a repeatable migration that starts with `DROP TABLE`. Any change
+to its checksum wipes the idempotency records of every consuming service on its next deploy, and with them the replay
+protection for keys in flight. The build fails if the file changes (`verifyIdempotencyMigrationUnchanged`). The
+`RETRYABLE` status needed no schema change: `status` is a `VARCHAR` with no check constraint.
+
+## Release Notes
+
+### Next release (FF-4394): retryable failures and in-transaction success
+
+- New `IdempotencyOptions` overload of `ensureIdempotency` with `retryOn` (default never) and
+  `successInOperationTransaction` (default false). Calls without options behave exactly as in 1.0.13.
+- New `RETRYABLE` record status, and `IdempotencyRetry.unlessRejected`.
+- Any non-default options are refused inside a caller's transaction. A result of the wrong type or that cannot be
+  serialised is never marked `RETRYABLE`. A failed commit is only offered to `retryOn` when the transaction manager
+  reports a definite rollback (new `IdempotencyTransactions.isDefiniteRollback`, default false; the Quarkus
+  implementation looks for JTA `RollbackException`), which covers a Hibernate flush failing at commit.
+- `IdempotencyRecordRepository` gains `markRetryable` and `claimRetryable`, with default implementations that throw,
+  so custom repositories still compile. `markRetryable` is only called when `retryOn` is used; if it is unsupported
+  the failure is cached as `ERROR` instead. `claimRetryable` is called whenever a matching `RETRYABLE` record exists
+  (on any path, including calls with default options), which only happens once some caller sharing the key and
+  context has opted in with `retryOn` — implement both before opting in with a custom repository.
+- The `operation` lambda is now `noinline`: a bare `return` from inside it no longer compiles (in 1.0.13 it left the
+  key `PENDING`; use `return@ensureIdempotency`), and it can no longer call `suspend` functions from an enclosing
+  `suspend` function.
+- `idempotency-quarkus` now depends on `quarkus-narayana-jta` (for `QuarkusTransaction`), which every consuming
+  service now gets at runtime. Services using Hibernate ORM or a JTA-enabled JDBC datasource already have it; any
+  consumer that did not will now start Narayana and enlist its datasource connections in JTA transactions.
+- **Default-path change:** a duplicate-key `SQLException` wrapped in another exception (anywhere along the cause
+  chain) is now also reported as a 409 conflict. 1.0.13 only recognised a directly thrown `SQLException` and let a
+  wrapped one propagate. This is the only behaviour change for calls without options.
+- The library's `@Transactional(REQUIRES_NEW)` annotations on `IdempotencyRecordCreator`/`IdempotencyRecordUpdater`
+  are not applied by Quarkus, because those beans come from producer methods. The default path keeps 1.0.13's
+  actual behaviour (each statement auto-commits, or joins the caller's transaction if it has one). Calls with options
+  demarcate their transactions explicitly through `IdempotencyTransactions`.
+- **Rolling deploys.** An instance still on 1.0.13 that reads a `RETRYABLE` record fails in
+  `IdempotencyStatus.valueOf` and returns a 500 for that key before running the operation, so nothing is cached or
+  duplicated. No record is `RETRYABLE` until an instance on the new version has opted an operation in, and the window
+  lasts only as long as the rollout. Deploy services normally.
