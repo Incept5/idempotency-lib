@@ -122,7 +122,7 @@ class RetryableIdempotencyTest {
     }
 
     @Test
-    fun `in-transaction success - a failed status write rolls the work back and the key does not end PENDING`() {
+    fun `in-transaction success with retry - an unserialisable result rolls the work back and is cached, never retried`() {
         val key = UUID.randomUUID().toString()
         val name = uniqueName("unserialisable")
 
@@ -130,7 +130,11 @@ class RetryableIdempotencyTest {
 
         assertEquals(1, WidgetService.runsFor(name))
         assertEquals(0, widgetService.countWidgets(name), "the operation's work must roll back with the status write")
-        assertEquals(IdempotencyStatus.RETRYABLE, record(key)!!.status)
+        // serialising the same result would fail the same way, so it is not offered a retry
+        assertEquals(IdempotencyStatus.ERROR, record(key)!!.status)
+
+        post(key, name, retry = true, inTx = true).then().statusCode(500)
+        assertEquals(1, WidgetService.runsFor(name))
     }
 
     @Test

@@ -15,7 +15,8 @@ package org.incept5.idempotency.service
  *
  * @param successInOperationTransaction when true, the operation and the SUCCESSFUL status write run in one
  * transaction that the checker opens; calling from inside a transaction is refused. The operation's work commits if
- * and only if the key becomes SUCCESSFUL. A @Transactional (REQUIRED) use case called from the operation joins this
+ * and only if the key becomes SUCCESSFUL. A failed status write rolls the work back and may be retried; a result of the
+ * wrong type, one that cannot be serialised, or a failed commit is always cached as ERROR. A @Transactional (REQUIRED) use case called from the operation joins this
  * transaction, so its work now commits after the result has been serialised, at the end of ensureIdempotency.
  * Do not use for operations that must commit part of their work before an external call (e.g. persisting state
  * before calling a payment processor): joining would hold all of it in one transaction across that call.

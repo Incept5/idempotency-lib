@@ -341,6 +341,48 @@ class IdempotencyCheckerRetryTest : FunSpec({
         record().status shouldBe IdempotencyStatus.SUCCESSFUL
     }
 
+    test("in-transaction success with unlessRejected: a commit that fails and rolls back is cached as ERROR, never retried") {
+        // call 1 creates the record, call 2 runs the operation
+        transactions.failCommitOfCall = 2
+        var runs = 0
+        shouldThrow<IllegalStateException> {
+            checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; work.add("row"); "ok" }
+        }
+        work.shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.ERROR
+        shouldThrow<CoreException> {
+            checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; work.add("row"); "ok" }
+        }
+        runs shouldBe 1
+    }
+
+    test("in-transaction success with unlessRejected: a commit that reports failure but committed keeps SUCCESSFUL") {
+        // call 1 creates the record, call 2 runs the operation
+        transactions.failCommitOfCall = 2
+        transactions.commitFailureCommits = true
+        var runs = 0
+        shouldThrow<IllegalStateException> {
+            checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; work.add("row"); "ok" }
+        }
+        work shouldContainExactly listOf("row")
+        record().status shouldBe IdempotencyStatus.SUCCESSFUL
+        checker.ensureIdempotency<String>(context, hash, retryableInTx) { runs++; "second" } shouldBe "ok"
+        runs shouldBe 1
+    }
+
+    test("in-transaction success with unlessRejected: a result of the wrong type rolls back and is cached as ERROR, never retried") {
+        var runs = 0
+        shouldThrow<ClassCastException> {
+            checker.ensureIdempotency<Result>(context, hash, retryableInTx) { runs++; work.add("row"); "not a Result" }
+        }
+        work.shouldBeEmpty()
+        record().status shouldBe IdempotencyStatus.ERROR
+        shouldThrow<CoreException> {
+            checker.ensureIdempotency<Result>(context, hash, retryableInTx) { runs++; Result("a", 1) }
+        }
+        runs shouldBe 1
+    }
+
     test("a result of the wrong type is cached as ERROR on the default path, as in 1.0.13") {
         shouldThrow<ClassCastException> {
             checker.ensureIdempotency<Result>(context, hash) { "not a Result" }

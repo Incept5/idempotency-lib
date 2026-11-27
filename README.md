@@ -180,8 +180,9 @@ val response = idempotencyChecker.ensureIdempotency<ExampleResponse>(
 When `retryOn` returns `true` for the exception the operation threw, the record is marked `RETRYABLE` instead of
 `ERROR` and the exception is rethrown. A failure *after* the operation has returned (serialising its result, or writing
 the `SUCCESSFUL` status) is always cached as `ERROR`, because the operation's work is already committed and a retry
-would run it twice. Use `successInOperationTransaction` (below) to make those failures roll the work back and become
-retryable too. The next request with the same key **and the same request hash** claims the record (one
+would run it twice. Use `successInOperationTransaction` (below) to make a failed status write roll the work back and
+become retryable too (a result of the wrong type, or one that cannot be serialised, is still cached as `ERROR`: it
+would fail the same way every time). The next request with the same key **and the same request hash** claims the record (one
 conditional update, so of two concurrent retries exactly one runs and the other gets a 409) and runs the operation
 again.
 
@@ -211,6 +212,10 @@ checker opens. A `@Transactional` (REQUIRED) use case called from the operation 
 only if the key becomes `SUCCESSFUL`. If anything fails the work rolls back, and the failure
 (`ERROR`, or `RETRYABLE` under `retryOn`) is written in its own transaction, so the key is never left `PENDING` by a
 rolled-back attempt.
+
+If the commit itself fails, its outcome may be unclear (e.g. the connection dropped during `COMMIT`). The checker
+re-reads the record: if it is `SUCCESSFUL` the commit did happen and is left alone, so a retry replays the success;
+otherwise the failure is cached as `ERROR` and never retried, even under `retryOn`.
 
 ```kotlin
 IdempotencyOptions(retryOn = IdempotencyRetry.unlessRejected, successInOperationTransaction = true)
@@ -248,7 +253,8 @@ protection for keys in flight. The build fails if the file changes (`verifyIdemp
 - New `IdempotencyOptions` overload of `ensureIdempotency` with `retryOn` (default never) and
   `successInOperationTransaction` (default false). Calls without options behave exactly as in 1.0.13.
 - New `RETRYABLE` record status, and `IdempotencyRetry.unlessRejected`.
-- Any non-default options are refused inside a caller's transaction.
+- Any non-default options are refused inside a caller's transaction. A commit failure, or a result of the wrong type
+  or that cannot be serialised, is never marked `RETRYABLE`.
 - `IdempotencyRecordRepository` gains `markRetryable` and `claimRetryable`, with default implementations that throw,
   so custom repositories still compile. `markRetryable` is only called when `retryOn` is used; if it is unsupported
   the failure is cached as `ERROR` instead. `claimRetryable` is called whenever a matching `RETRYABLE` record exists

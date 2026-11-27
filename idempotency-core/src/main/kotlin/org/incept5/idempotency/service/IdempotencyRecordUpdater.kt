@@ -32,6 +32,12 @@ class IdempotencyRecordUpdater(
     }
 
     /**
+     * The record's current status, or null if it does not exist
+     */
+    fun currentStatus(key: String, context: String): IdempotencyStatus? =
+        repository.findRecordByKeyAndContext(key, context)?.status
+
+    /**
      * Mark the record RETRYABLE after a temporary failure, keeping its request hash and expiry
      */
     @Transactional(Transactional.TxType.REQUIRES_NEW)

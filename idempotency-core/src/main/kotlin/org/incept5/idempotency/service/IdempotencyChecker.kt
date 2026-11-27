@@ -156,23 +156,26 @@ class IdempotencyChecker @JvmOverloads constructor(
             }
         }
 
-        // Set once the operation has returned outside a transaction the checker controls. Its work is then done
-        // (committed), so a later failure (serialising the result, writing the status) must never be retried:
-        // that would run the operation twice
-        var operationReturned = false
+        // where we are, so that a failure is only offered a retry when running the operation again is safe
+        var stage = Stage.RUNNING_OPERATION
         try {
             val result = if (options.successInOperationTransaction) {
                 // the operation's work and the SUCCESSFUL status commit (or roll back) together
                 transactions.requiresNew {
                     val result = operation()
-                    recordUpdater.updateRecordStatusInCurrentTransaction(key, context, IdempotencyStatus.SUCCESSFUL, serialise(result, resultIsString))
-                    // a result of the wrong type rolls the work back rather than committing it under an ERROR
+                    // a result of the wrong type (or one that cannot be serialised) rolls the work back rather than
+                    // committing it under an ERROR
+                    stage = Stage.CONVERTING_RESULT
                     castResult(result, resultType)
+                    val response = serialise(result, resultIsString)
+                    stage = Stage.WRITING_STATUS_IN_TRANSACTION
+                    recordUpdater.updateRecordStatusInCurrentTransaction(key, context, IdempotencyStatus.SUCCESSFUL, response)
+                    stage = Stage.COMMITTING
                     result
                 }
             } else {
                 val result = operation()
-                operationReturned = true
+                stage = Stage.OPERATION_COMMITTED
                 val response = serialise(result, resultIsString)
                 isolated(options) { recordUpdater.updateRecordStatus(key, context, IdempotencyStatus.SUCCESSFUL, response) }
                 result
@@ -186,12 +189,48 @@ class IdempotencyChecker @JvmOverloads constructor(
                 recordFailure(key, context, options, e, retryAllowed = false)
                 throw e
             }
+            if (stage == Stage.COMMITTING && commitMayHaveSucceeded(key, context)) {
+                // the commit failed with an unclear outcome and the SUCCESSFUL status (and so the work) is visible:
+                // it did commit. Leave it, so the client's retry replays the success
+                LOG.warn("Commit reported a failure but the SUCCESSFUL status committed for key={} and context={}", key, context, e)
+                throw e
+            }
             try {
-                recordFailure(key, context, options, e, retryAllowed = !operationReturned)
+                recordFailure(key, context, options, e, retryAllowed = stage.retryAllowed)
             } catch (recordingFailure: Throwable) {
                 e.addSuppressed(recordingFailure)
             }
             throw e
+        }
+    }
+
+    /**
+     * Where ensureIdempotency was when something failed, and whether running the operation again is then safe
+     */
+    private enum class Stage(val retryAllowed: Boolean) {
+        /** the operation itself failed: its work did not commit (or, inside our transaction, rolled back) */
+        RUNNING_OPERATION(true),
+        /** the result has the wrong type or cannot be serialised: deterministic, so running again would fail again */
+        CONVERTING_RESULT(false),
+        /** the SUCCESSFUL write inside our transaction failed: the work rolled back with it */
+        WRITING_STATUS_IN_TRANSACTION(true),
+        /** our transaction failed to commit: the work may or may not have committed, so never run it again */
+        COMMITTING(false),
+        /** the operation returned outside a transaction we control: its work is committed */
+        OPERATION_COMMITTED(false),
+    }
+
+    /**
+     * After a failed commit, whether the record shows that the commit actually happened. If the record cannot be
+     * read, assume it may have, and cache nothing: the key stays PENDING rather than risking an ERROR over a success.
+     */
+    private fun commitMayHaveSucceeded(key: String, context: String): Boolean {
+        return try {
+            transactions.requiresNew { recordUpdater.currentStatus(key, context) } != IdempotencyStatus.PENDING
+        } catch (readFailure: Exception) {
+            LOG.error("Could not read the idempotency record for key={} and context={} after a failed commit, so it " +
+                "stays PENDING (409 until it expires)", key, context, readFailure)
+            true
         }
     }
 

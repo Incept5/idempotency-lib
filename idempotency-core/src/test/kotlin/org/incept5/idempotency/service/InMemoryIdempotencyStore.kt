@@ -65,17 +65,35 @@ class FakeTransactions(
 ) : IdempotencyTransactions {
     var requiresNewCount = 0
 
+    /** the requiresNew call (counting from 1) whose commit fails; [commitFailureCommits] says whether it committed anyway */
+    var failCommitOfCall: Int? = null
+    var commitFailureCommits = false
+
     /** set to simulate a caller that is already in a transaction */
     var callerTransactionActive = false
     private var inTransaction = false
 
     override fun <T> requiresNew(block: () -> T): T {
-        requiresNewCount++
+        val call = ++requiresNewCount
         val recordsBefore = repository.records.toMap()
         val workBefore = work.toList()
         inTransaction = true
         try {
-            return block()
+            val result = block()
+            if (failCommitOfCall == call) {
+                if (commitFailureCommits) throw CommittedButReportedFailure()
+                throw CommitFailedException()
+            }
+            return result
+        } catch (e: CommittedButReportedFailure) {
+            // the commit happened: keep its changes
+            throw IllegalStateException("simulated commit failure after commit")
+        } catch (e: CommitFailedException) {
+            repository.records.clear()
+            repository.records.putAll(recordsBefore)
+            work.clear()
+            work.addAll(workBefore)
+            throw IllegalStateException("simulated commit failure, rolled back")
         } catch (e: Throwable) {
             repository.records.clear()
             repository.records.putAll(recordsBefore)
@@ -89,3 +107,6 @@ class FakeTransactions(
 
     override fun isTransactionActive(): Boolean = inTransaction || callerTransactionActive
 }
+
+private class CommitFailedException : RuntimeException()
+private class CommittedButReportedFailure : RuntimeException()
