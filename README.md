@@ -250,7 +250,10 @@ protection for keys in flight. The build fails if the file changes (`verifyIdemp
 - New `RETRYABLE` record status, and `IdempotencyRetry.unlessRejected`.
 - Any non-default options are refused inside a caller's transaction.
 - `IdempotencyRecordRepository` gains `markRetryable` and `claimRetryable`, with default implementations that throw,
-  so custom repositories still compile; they are only called when `retryOn` is used.
+  so custom repositories still compile. `markRetryable` is only called when `retryOn` is used; if it is unsupported
+  the failure is cached as `ERROR` instead. `claimRetryable` is called whenever a matching `RETRYABLE` record exists
+  (on any path, including calls with default options), which only happens once some caller sharing the key and
+  context has opted in with `retryOn` — implement both before opting in with a custom repository.
 - The `operation` lambda is now `noinline`: a bare `return` from inside it no longer compiles (in 1.0.13 it left the
   key `PENDING`; use `return@ensureIdempotency`), and it can no longer call `suspend` functions from an enclosing
   `suspend` function.
