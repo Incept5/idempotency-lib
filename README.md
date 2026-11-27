@@ -186,7 +186,7 @@ conditional update, so of two concurrent retries exactly one runs and the other 
 again.
 
 - `IdempotencyRetry.unlessRejected` retries everything except a `CoreException` in a 4xx category (anything but
-  `UNEXPECTED`), including one attached as a suppressed exception. Rejections stay cached.
+  `UNEXPECTED`), including one attached as a suppressed exception or wrapped as a cause. Rejections stay cached.
 - `IdempotencyRetry.never` is the default.
 - A key freed by a temporary failure stays bound to the request it was first used for. A different payload sent
   with it gets `IDEMPOTENCY_HASH_MISMATCH` (400), the same as after a success or a rejection.

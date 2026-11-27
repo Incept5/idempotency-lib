@@ -100,6 +100,28 @@ class IdempotencyCheckerRetryTest : FunSpec({
         }.category shouldBe ErrorCategory.NOT_FOUND
     }
 
+    test("unlessRejected treats a rejection wrapped as a cause as a rejection") {
+        var runs = 0
+        shouldThrow<java.util.concurrent.CompletionException> {
+            checker.ensureIdempotency<String>(context, hash, retryable) {
+                runs++
+                throw java.util.concurrent.CompletionException(RuntimeException("proxy", rejection()))
+            }
+        }
+        record().status shouldBe IdempotencyStatus.ERROR
+        shouldThrow<CoreException> {
+            checker.ensureIdempotency<String>(context, hash, retryable) { runs++; "ok" }
+        }
+        runs shouldBe 1
+    }
+
+    test("unlessRejected terminates on a cyclic cause chain") {
+        val a = RuntimeException("a")
+        val b = RuntimeException("b", a)
+        a.initCause(b)
+        IdempotencyRetry.unlessRejected(a) shouldBe true
+    }
+
     test("unlessRejected retries a CoreException in the UNEXPECTED category") {
         shouldThrow<CoreException> {
             checker.ensureIdempotency<String>(context, hash, retryable) { throw rejection(ErrorCategory.UNEXPECTED) }
